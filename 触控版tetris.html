@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>俄罗斯方块 · Tetris</title>
+<style>
+:root{ --accent:#00e5ff; --accent2:#c400ff; --side:212px; --gap:16px; }
+*{box-sizing:border-box;margin:0;padding:0}
+html{height:100%}
+body{
+  font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+  background:radial-gradient(1200px 700px at 70% -10%, #16225c 0%, #0a0e27 45%, #04061a 100%);
+  color:#e8ecff;
+  display:flex; flex-direction:column; align-items:center;
+  height:100vh; height:100dvh;                 /* 整页固定在一屏内，不允许滚动 */
+  overflow:hidden; overscroll-behavior:none; touch-action:manipulation;
+  padding:10px 14px calc(8px + env(safe-area-inset-bottom));
+  user-select:none; -webkit-user-select:none; -webkit-tap-highlight-color:transparent;
+}
+header{flex:none;text-align:center;margin:0 0 8px}
+h1{font-size:24px;letter-spacing:6px;font-weight:800;
+  background:linear-gradient(90deg,var(--accent),#7a5cff,var(--accent2));
+  -webkit-background-clip:text;background-clip:text;color:transparent;}
+header p{font-size:11px;color:#8ea0d8;letter-spacing:3px;margin-top:2px}
+
+/* 主区 = 棋盘 + 侧栏；剩余空间由脚本实测后分配给棋盘（见 fitStage） */
+#wrap{flex:1 1 auto;min-height:0;width:100%;display:flex;align-items:center;justify-content:center;gap:var(--gap);overflow:hidden}
+#stage{position:relative;flex:none;min-width:0;width:392px;height:692px}
+#board{
+  display:block;width:100%;height:100%;border-radius:14px;background:#070b21;touch-action:none;
+  box-shadow:0 0 0 1px rgba(0,229,255,.35),0 0 34px rgba(0,229,255,.14),0 0 60px rgba(196,0,255,.10),inset 0 0 60px rgba(0,0,0,.6);
+}
+#overlay{position:absolute;inset:0;border-radius:14px;display:none;flex-direction:column;
+  align-items:center;justify-content:center;background:rgba(4,6,20,.84);backdrop-filter:blur(4px);
+  text-align:center;padding:18px;cursor:pointer;z-index:5}
+#overlay.show{display:flex}
+#ovTitle{font-size:30px;letter-spacing:4px;font-weight:800;color:var(--accent);
+  background:none;-webkit-background-clip:initial;background-clip:initial;
+  text-shadow:0 0 26px rgba(0,229,255,.6);margin-bottom:12px;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.5}}
+#ovInfo{font-size:14px;color:#aab8e8;line-height:2.1}
+kbd{display:inline-block;background:#1a2348;border:1px solid #37509c;border-bottom-width:3px;border-radius:6px;padding:1px 8px;font-family:Consolas,monospace;font-size:12px;color:#cfe1ff;margin:0 2px}
+
+#side{width:var(--side);flex:none;min-width:0;max-height:100%;display:flex;flex-direction:column;gap:10px}
+.pnl{background:rgba(255,255,255,.035);border:1px solid rgba(0,229,255,.16);border-radius:12px;padding:10px 12px;min-width:0;overflow:hidden}
+.lbl{font-size:11px;letter-spacing:3px;color:#7f93cc;text-transform:uppercase}
+#holdC{display:block;margin:6px auto 0;width:188px;max-width:100%;height:64px}
+#nextC{display:block;margin:6px auto 0;width:188px;max-width:100%;height:156px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:0}
+.stat{min-width:0}
+.stat .lbl{letter-spacing:1px}
+.stat .v{font-family:Consolas,monospace;font-size:21px;color:#fff;text-shadow:0 0 14px rgba(0,229,255,.55);margin-top:2px;word-break:break-all}
+#keys{font-size:12px;line-height:2.05;color:#93a6dd}
+#keys b{color:#dfe9ff;font-weight:600}
+
+/* 虚拟按键：左侧移动簇（左手拇指）+ 右侧动作簇（右手拇指） */
+#touch{flex:none;display:none;width:100%;max-width:440px;margin:8px auto 0;gap:12px;
+  align-items:flex-end;justify-content:space-between}
+#touch .cluster{flex:1 1 0;min-width:0;display:grid;grid-template-columns:repeat(2,minmax(50px,1fr));gap:7px}
+#touch button{height:54px;border-radius:14px;border:1px solid #2e4d8f;background:rgba(30,45,95,.62);
+  color:#cfe1ff;font-size:19px;line-height:1.1;font-family:inherit;cursor:pointer;
+  touch-action:none;user-select:none;-webkit-user-select:none}
+#touch button small{display:block;font-size:9px;letter-spacing:1px;opacity:.6;margin-top:3px}
+#touch button:active{background:var(--accent);color:#04122a;transform:scale(.97)}
+#touch button.wide{grid-column:1/-1}
+
+.btns{flex:none;display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:8px}
+.btn{height:38px;min-width:92px;padding:0 12px;border-radius:10px;border:1px solid #2e4d8f;background:rgba(30,45,95,.55);color:#cfe1ff;
+  font-size:13px;cursor:pointer;font-family:inherit;transition:background .15s,transform .05s}
+.btn:hover{background:rgba(50,75,150,.7)}
+.btn:active{transform:scale(.96)}
+.btn.on{color:#04122a;background:var(--accent);border-color:var(--accent);box-shadow:0 0 14px rgba(0,229,255,.5)}
+footer{flex:none;margin-top:8px;font-size:11px;color:#55638f;letter-spacing:1px}
+
+/* ---------- 手机 / 触屏紧凑布局（由脚本按实际设备加 body.compact） ---------- */
+body.compact{--side:92px;--gap:6px;padding:4px 6px calc(4px + env(safe-area-inset-bottom))}
+body.compact header{margin:0 0 4px}
+body.compact h1{font-size:16px;letter-spacing:3px}
+body.compact header p,body.compact footer,body.compact #keys,body.compact .stat.best{display:none}
+body.compact #wrap{align-items:flex-start}
+body.compact .pnl{padding:5px 6px;border-radius:9px}
+body.compact .lbl{font-size:9px;letter-spacing:1px}
+body.compact .stats{grid-template-columns:1fr;gap:4px}
+body.compact .stat .v{font-size:14px;text-shadow:none}
+body.compact #holdC,body.compact #nextC{width:100%;height:auto;margin-top:4px}
+body.compact #holdC{aspect-ratio:188/64}
+body.compact #nextC{aspect-ratio:188/156}
+body.compact .btns{margin-top:6px}
+body.compact .btn{flex:1 1 44%;min-width:0;height:30px;padding:0 4px;font-size:12px;border-radius:8px}
+body.compact #touch{display:flex;margin-top:6px}
+body.compact #ovTitle{font-size:24px;letter-spacing:2px}
+body.compact #ovInfo{font-size:12px;line-height:1.9}
+@media (orientation:landscape) and (max-height:600px){
+  body.compact header{display:none}
+  body.compact #touch button{height:42px;font-size:16px}
+  body.compact .btn{height:26px}
+}
+@media (max-height:760px){ #keys{display:none} }
+</style>
+</head>
+<body>
+<header>
+  <h1>俄罗斯方块</h1>
+  <p>HTML5 · 音效 · 消除爆炸特效</p>
+</header>
+
+<div id="wrap">
+  <div id="stage">
+    <canvas id="board"></canvas>
+    <div id="overlay"><h1 id="ovTitle"></h1><p id="ovInfo"></p></div>
+  </div>
+
+  <div id="side">
+    <div class="pnl">
+      <span class="lbl">暂存 Hold</span>
+      <canvas id="holdC"></canvas>
+    </div>
+    <div class="stats">
+      <div class="pnl stat"><div class="lbl">分数</div><div class="v" id="hudScore">0</div></div>
+      <div class="pnl stat best"><div class="lbl">最高分</div><div class="v" id="hudBest">0</div></div>
+      <div class="pnl stat"><div class="lbl">等级</div><div class="v" id="hudLevel">1</div></div>
+      <div class="pnl stat"><div class="lbl">行数</div><div class="v" id="hudLines">0</div></div>
+    </div>
+    <div class="pnl">
+      <span class="lbl">下一个 Next</span>
+      <canvas id="nextC"></canvas>
+    </div>
+    <div class="pnl" id="keys">
+      <span class="lbl">操作说明</span><br>
+      <b>← →</b> 移动 &nbsp; <b>↑ / X</b> 旋转<br>
+      <b>Z</b> 反向旋转 &nbsp; <b>↓</b> 软降<br>
+      <b>空格</b> 硬降 &nbsp; <b>C</b> 暂存<br>
+      <b>P</b> 暂停 &nbsp; <b>R</b> 重开<br>
+      <b>N</b> 音效开关 &nbsp; <b>M</b> 音乐开关<br>
+      <b>触屏</b> 拖动移动 · 轻点旋转 · 下滑硬降
+    </div>
+  </div>
+</div>
+
+<div id="touch" aria-label="虚拟按键">
+  <div class="cluster">
+    <button data-act="left" aria-label="左移">◀<small>左移</small></button>
+    <button data-act="right" aria-label="右移">▶<small>右移</small></button>
+    <button data-act="down" aria-label="软降">▼<small>软降</small></button>
+    <button data-act="takehold" aria-label="暂存">H<small>暂存</small></button>
+  </div>
+  <div class="cluster">
+    <button data-act="rotateCCW" aria-label="反向旋转">↺<small>反转</small></button>
+    <button data-act="rotateCW" aria-label="旋转">↻<small>旋转</small></button>
+    <button class="wide" data-act="hard" aria-label="硬降">⤓ 硬降</button>
+  </div>
+</div>
+
+<div class="btns">
+  <button class="btn" id="btnStart">开始 / 暂停</button>
+  <button class="btn" id="btnRestart">重新开始</button>
+  <button class="btn on" id="btnSfx">音效: 开</button>
+  <button class="btn" id="btnMusic">音乐: 关</button>
+</div>
+
+<footer>纯单文件实现 · 音效由 Web Audio 实时合成 · 无任何外部资源</footer>
+
+<script>
+(() => {
+'use strict';
+/* ================= 配置 ================= */
+const COLS = 10, ROWS = 20, CELL = 30, MARGIN = 46;
+const FW = COLS * CELL, FH = ROWS * CELL, W = FW + MARGIN * 2, H = FH + MARGIN * 2;
+const LOCK_DELAY = 500, MAX_LOCK_RESETS = 15, DAS = 170, ARR = 45;
+
+const COLORS = { I:'#00e5ff', J:'#4169ff', L:'#ff9100', O:'#ffd600', S:'#00e676', T:'#c400ff', Z:'#ff2e54' };
+const SHAPES = {
+  I:[[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+  J:[[1,0,0],[1,1,1],[0,0,0]],
+  L:[[0,0,1],[1,1,1],[0,0,0]],
+  O:[[1,1],[1,1]],
+  S:[[0,1,1],[1,1,0],[0,0,0]],
+  T:[[0,1,0],[1,1,1],[0,0,0]],
+  Z:[[1,1,0],[0,1,1],[0,0,0]]
+};
+const KICKS = [[0,0],[-1,0],[1,0],[0,-1],[-2,0],[2,0],[-1,-1],[1,-1]];
+
+/* ================= 画布 ================= */
+function setupCanvas(c, w, h) {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  c.width = w * dpr; c.height = h * dpr;
+  const x = c.getContext('2d');
+  x.scale(dpr, dpr);
+  return x;
+}
+const canvas = document.getElementById('board');
+const ctx = setupCanvas(canvas, W, H);
+const holdCtx = setupCanvas(document.getElementById('holdC'), 188, 64);
+const nextCtx = setupCanvas(document.getElementById('nextC'), 188, 156);
+const holdCv = document.getElementById('holdC'), nextCv = document.getElementById('nextC');
+
+/* ================= DOM ================= */
+const $ = id => document.getElementById(id);
+const hudScore = $('hudScore'), hudBest = $('hudBest'), hudLevel = $('hudLevel'), hudLines = $('hudLines');
+const overlayEl = $('overlay'), ovTitle = $('ovTitle'), ovInfo = $('ovInfo');
+const btnStart = $('btnStart'), btnRestart = $('btnRestart'), btnSfx = $('btnSfx'), btnMusic = $('btnMusic');
+
+/* ============ 自适应布局：把屏幕剩余空间精确分配给棋盘 ============ */
+const stageEl = canvas.parentElement, wrapEl = $('wrap'), sideEl = $('side');
+function isCompact() {
+  const vw = document.documentElement.clientWidth;
+  const coarse = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  return vw < 860 || coarse;
+}
+function fitStage() {
+  document.body.classList.toggle('compact', isCompact());
+  const cs = getComputedStyle(wrapEl);
+  const gap = parseFloat(cs.columnGap || cs.gap || '0') || 0;
+  const availH = wrapEl.clientHeight;
+  const availW = wrapEl.clientWidth - sideEl.offsetWidth - gap;
+  let h = Math.min(H, availH), w = h * W / H;
+  if (w > availW) { w = availW; h = w * H / W; }
+  h = Math.max(200, Math.floor(h)); w = Math.max(114, Math.floor(w));
+  stageEl.style.width = w + 'px';
+  stageEl.style.height = h + 'px';
+}
+fitStage();
+window.addEventListener('resize', fitStage);
+window.addEventListener('orientationchange', () => setTimeout(fitStage, 300));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => setTimeout(fitStage, 120));
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitStage);
+
+/* ================= 音效引擎（Web Audio 合成，无需音频文件） ================= */
+const Snd = {
+  ctx: null, master: null, muted: false, _noise: null,
+  ensure() {
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.6;
+      this.master.connect(this.ctx.destination);
+    } catch (e) {}
+  },
+  tone(f, d = 0.08, type = 'square', v = 0.15, slide = null, delay = 0) {
+    const c = this.ctx; if (!c || this.muted) return;
+    const t = c.currentTime + delay;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(Math.max(20, f), t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, slide), t + d);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(v, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + d + 0.05);
+  },
+  noiseBurst(d = 0.12, v = 0.3, fc = 900, delay = 0) {
+    const c = this.ctx; if (!c || this.muted) return;
+    if (!this._noise) {
+      const len = c.sampleRate | 0;
+      const buf = c.createBuffer(1, len, c.sampleRate);
+      const dat = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) dat[i] = Math.random() * 2 - 1;
+      this._noise = buf;
+    }
+    const t = c.currentTime + delay;
+    const s = c.createBufferSource(); s.buffer = this._noise;
+    const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = fc;
+    const g = c.createGain();
+    g.gain.setValueAtTime(v, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    s.connect(f); f.connect(g); g.connect(this.master);
+    s.start(t); s.stop(t + d + 0.05);
+  },
+  /* --- 各事件音效 --- */
+  sMove()   { this.tone(210, 0.04, 'square', 0.06); },
+  sRotate() { this.tone(330, 0.07, 'square', 0.08, 520); },
+  sSoft()   { this.tone(150, 0.03, 'triangle', 0.05); },
+  sHard()   { this.noiseBurst(0.14, 0.25, 600); this.tone(80, 0.18, 'sine', 0.25, 45); },
+  sLock()   { this.tone(120, 0.07, 'triangle', 0.12, 90); },
+  sHold()   { this.tone(520, 0.06, 'sine', 0.1, 660); this.tone(660, 0.07, 'sine', 0.1, 800, 0.06); },
+  sClear(n) {
+    const seq = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+    const k = Math.min(3 + n, seq.length);
+    for (let i = 0; i < k; i++) this.tone(seq[i], 0.09, 'square', 0.11, null, i * 0.05);
+    this.noiseBurst(0.3, 0.16, 2600);                    // 爆炸白噪
+    if (n >= 4) { this.tone(200, 0.35, 'sawtooth', 0.12, 1400); this.tone(150, 0.4, 'sine', 0.18, 60, 0.05); }
+  },
+  sLevelUp(){ [392, 523.25, 659.25, 783.99].forEach((f, i) => this.tone(f, 0.09, 'square', 0.11, null, i * 0.08)); },
+  sCombo(n){ this.tone(600 + Math.min(n, 8) * 60, 0.06, 'square', 0.07, null); },
+  sOver()   { [659.25, 523.25, 440, 349.23, 261.63].forEach((f, i) => this.tone(f, 0.18, 'sawtooth', 0.12, f * 0.92, i * 0.16)); }
+};
+
+/* ================= 芯片音乐（ Korobeiniki 主题风格循环） ================= */
+const Music = {
+  on: false, tid: null, t: 0, s: 0, STEP: 0.2,
+  // 主旋律 [频率, 八分音符步数]，32 步 = 4 小节
+  MELO: [
+    [659.25,2],[493.88,1],[523.25,1],[587.33,2],[523.25,1],[493.88,1],
+    [440,2],[440,1],[523.25,1],[587.33,2],[523.25,2],
+    [493.88,3],[587.33,1],[659.25,2],
+    [523.25,2],[440,2],[440,4]
+  ],
+  CHORDS: [ // 每小节低音分解和弦
+    [82.41, 123.47, 164.81, 123.47],   // Em
+    [110.0, 164.81, 220.0, 164.81],    // Am
+    [123.47, 185.0, 246.94, 185.0],    // Bm
+    [110.0, 164.81, 220.0, 164.81]     // Am
+  ],
+  toggle() {
+    this.on = !this.on;
+    if (this.on) {
+      Snd.ensure();
+      if (!Snd.ctx) { this.on = false; return; } // 需先有用户手势
+      this.t = Snd.ctx.currentTime + 0.1; this.s = 0;
+      if (!this.tid) this.tid = setInterval(() => this.sched(), 40);
+    } else if (this.tid) { clearInterval(this.tid); this.tid = null; }
+    btnMusic.textContent = '音乐: ' + (this.on ? '开' : '关');
+    btnMusic.classList.toggle('on', this.on);
+  },
+  sched() {
+    const c = Snd.ctx; if (!c) return;
+    while (this.t < c.currentTime + 0.15) {
+      const gs = this.s % 64;           // 两遍乐句循环
+      const pos = gs % 32;
+      // 主旋律
+      let acc = 0;
+      for (const [f, d] of this.MELO) {
+        if (acc === pos) { Snd.tone(f, this.STEP * d * 0.88, 'square', 0.045); break; }
+        acc += d; if (acc > pos) break;
+      }
+      // 低音 + 底鼓
+      const bar = (gs >> 3) % 4, step = gs % 8;
+      Snd.tone(this.CHORDS[bar][step % 4], this.STEP * 0.8, 'triangle', 0.055);
+      if (step === 0) Snd.tone(50, 0.1, 'sine', 0.14, 30);
+      this.t += this.STEP; this.s++;
+    }
+  }
+};
+
+/* ================= 特效系统（粒子爆炸 / 冲击环 / 闪白 / 飘字 / 震屏） ================= */
+const fx = { parts: [], rings: [], flashes: [], floats: [], big: 0, shake: 0 };
+const rand = (a, b) => a + Math.random() * (b - a);
+function updateFx(dt) {
+  for (let i = fx.parts.length - 1; i >= 0; i--) {
+    const p = fx.parts[i];
+    p.vy += 820 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
+    p.life -= dt;
+    if (p.life <= 0) fx.parts.splice(i, 1);
+  }
+  for (let i = fx.rings.length - 1; i >= 0; i--) {
+    const r = fx.rings[i]; r.life -= dt;
+    if (r.life <= 0) fx.rings.splice(i, 1);
+  }
+  for (let i = fx.flashes.length - 1; i >= 0; i--) {
+    fx.flashes[i].life -= dt;
+    if (fx.flashes[i].life <= 0) fx.flashes.splice(i, 1);
+  }
+  for (let i = fx.floats.length - 1; i >= 0; i--) {
+    const f = fx.floats[i]; f.y += f.vy * dt; f.vy += 30 * dt; f.life -= dt;
+    if (f.life <= 0) fx.floats.splice(i, 1);
+  }
+  if (fx.big > 0) fx.big = Math.max(0, fx.big - dt * 1.8);
+  if (fx.shake > 0) fx.shake = Math.max(0, fx.shake - dt * 30);
+}
+function spawnBurst(x, y, color, count, power, size) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2, sp = rand(power * 0.3, power);
+    fx.parts.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - rand(20, 160),
+      s: rand(2, size), life: rand(0.55, 1.15), max: 1.15, rot: rand(0, 6.28), vr: rand(-9, 9), color });
+  }
+  if (fx.parts.length > 1600) fx.parts.splice(0, fx.parts.length - 1600);
+}
+function clearRowFx(row, colors, n) {
+  const cy = row * CELL + CELL / 2;
+  for (let x = 0; x < COLS; x++) spawnBurst(x * CELL + CELL / 2, cy, colors[x], 9, 340, 7);
+  fx.flashes.push({ y: row * CELL, colors, life: 0.3, max: 0.3 });
+  fx.rings.push({ x: FW / 2, y: cy, r: 0, maxR: 150 + 45 * n, life: 0.45, max: 0.45, color: '#ffffff' });
+}
+function drawFx() {
+  for (const p of fx.parts) {
+    ctx.globalAlpha = Math.max(0, p.life / p.max);
+    ctx.fillStyle = p.color;
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+    ctx.fillRect(-p.s / 2, -p.s / 2, p.s, p.s);
+    ctx.restore();
+  }
+  for (const r of fx.rings) {
+    const k = r.life / r.max;
+    ctx.globalAlpha = k * 0.9;
+    ctx.strokeStyle = r.color; ctx.lineWidth = 2 + 4 * k;
+    ctx.beginPath(); ctx.arc(r.x, r.y, r.maxR * (1 - k) + 8, 0, 6.283); ctx.stroke();
+  }
+  for (const f of fx.flashes) {
+    const k = f.life / f.max;
+    for (let x = 0; x < COLS; x++) {
+      ctx.globalAlpha = k * 0.55; ctx.fillStyle = f.colors[x];
+      ctx.fillRect(x * CELL, f.y, CELL, CELL);
+    }
+    const g = ctx.createLinearGradient(0, f.y, 0, f.y + CELL);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.5, 'rgba(255,255,255,' + (0.95 * k) + ')');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.globalAlpha = 1; ctx.fillStyle = g;
+    ctx.fillRect(0, f.y - 6, FW, CELL + 12);
+  }
+  ctx.globalAlpha = 1; ctx.textAlign = 'center';
+  for (const t of fx.floats) {
+    const k = Math.min(1, t.life / t.max * 1.6);
+    ctx.globalAlpha = k;
+    ctx.font = 'bold ' + t.size + 'px Consolas,"Microsoft YaHei",monospace';
+    ctx.shadowColor = t.color; ctx.shadowBlur = 14;
+    ctx.fillStyle = t.color;
+    ctx.fillText(t.text, t.x, t.y);
+    ctx.shadowBlur = 0;
+  }
+  ctx.globalAlpha = 1; ctx.textAlign = 'left';
+}
+function addFloat(text, x, y, color, size, life) {
+  fx.floats.push({ text, x, y, color, size, vy: -46, life, max: life });
+}
+
+/* ================= 状态 ================= */
+let state = 'idle';            // idle | playing | paused | over
+let board, cur, bag, queue, hold, canHold;
+let score, lines, level, combo, best;
+let fallTimer = 0, groundTimer = 0, grounded = false, lockResets = 0;
+
+function loadBest() { try { return +localStorage.getItem('tetris_best') || 0; } catch (e) { return 0; } }
+function saveBest() { try { localStorage.setItem('tetris_best', best); } catch (e) {} }
+
+function loadBestSafe() { best = loadBest(); }
+
+function reset() {
+  board = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+  bag = []; queue = []; ensureQueue();
+  hold = null; canHold = true;
+  score = 0; lines = 0; level = 1; combo = 0;
+  fx.parts.length = 0; fx.rings.length = 0; fx.flashes.length = 0; fx.floats.length = 0;
+  fx.big = 0; fx.shake = 0;
+  fallTimer = 0; groundTimer = 0; grounded = false; lockResets = 0;
+  cur = spawnPiece(queue.shift()); ensureQueue();
+  updateHUD(); drawMini();
+}
+
+function nextType() {
+  if (!bag.length) {
+    bag = ['I','J','L','O','S','T','Z'];
+    for (let i = bag.length - 1; i > 0; i--) {
+      const j = Math.random() * (i + 1) | 0;
+      [bag[i], bag[j]] = [bag[j], bag[i]];
+    }
+  }
+  return bag.pop();
+}
+function ensureQueue() { while (queue.length < 3) queue.push(nextType()); }
+
+function spawnPiece(type) {
+  const m = SHAPES[type].map(r => r.slice());
+  return { type, m, x: (COLS - m[0].length) >> 1, y: -1 };
+}
+
+/* ================= 碰撞 / 移动 ================= */
+function collision(m, px, py) {
+  for (let y = 0; y < m.length; y++) for (let x = 0; x < m[y].length; x++) {
+    if (!m[y][x]) continue;
+    const bx = px + x, by = py + y;
+    if (bx < 0 || bx >= COLS || by >= ROWS) return true;
+    if (by >= 0 && board[by][bx]) return true;
+  }
+  return false;
+}
+function afterMove() {
+  const nowG = collision(cur.m, cur.x, cur.y + 1);
+  if (nowG) {
+    if (!grounded) { grounded = true; groundTimer = 0; lockResets = 0; }
+    else if (lockResets < MAX_LOCK_RESETS) { groundTimer = 0; lockResets++; }
+  } else { grounded = false; groundTimer = 0; lockResets = 0; }
+}
+function tryMove(dx, dy) {
+  if (state !== 'playing' || !cur) return false;
+  if (collision(cur.m, cur.x + dx, cur.y + dy)) return false;
+  cur.x += dx; cur.y += dy;
+  if (dy > 0) fallTimer = 0;
+  afterMove();
+  return true;
+}
+function rotateM(m, cw) {
+  const N = m.length, r = Array.from({ length: N }, () => Array(N).fill(0));
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++)
+    r[i][j] = cw ? m[N - 1 - j][i] : m[j][N - 1 - i];
+  return r;
+}
+function tryRotate(cw) {
+  if (state !== 'playing' || !cur) return;
+  const m = rotateM(cur.m, cw);
+  for (const [kx, ky] of KICKS) {
+    if (!collision(m, cur.x + kx, cur.y + ky)) {
+      cur.m = m; cur.x += kx; cur.y += ky;
+      afterMove();
+      Snd.sRotate();
+      return;
+    }
+  }
+}
+function ghostY() {
+  let y = cur.y;
+  while (!collision(cur.m, cur.x, y + 1)) y++;
+  return y;
+}
+function curSpeed() { return Math.max(70, 800 - (level - 1) * 65); }
+
+/* ================= 落块 / 消行 ================= */
+function hardDrop() {
+  if (!cur) return;
+  let dist = 0;
+  while (!collision(cur.m, cur.x, cur.y + 1)) { cur.y++; dist++; }
+  if (dist) score += dist * 2;
+  Snd.sHard();
+  fx.shake = Math.min(6, 2 + dist * 0.15);
+  // 落地尘土
+  for (let y = 0; y < cur.m.length; y++) for (let x = 0; x < cur.m[y].length; x++) {
+    if (cur.m[y][x] && y === cur.m.length - 1 || cur.m[y][x] && cur.m[y + 1] && !cur.m[y + 1][x]) {
+      spawnBurst((cur.x + x) * CELL + CELL / 2, (cur.y + y + 1) * CELL, '#9fb4ff', 4, 160, 4);
+    }
+  }
+  lockPiece();
+}
+function lockPiece() {
+  let topOut = false;
+  for (let y = 0; y < cur.m.length; y++) for (let x = 0; x < cur.m[y].length; x++) {
+    if (!cur.m[y][x]) continue;
+    const by = cur.y + y, bx = cur.x + x;
+    if (by < 0) { topOut = true; continue; }
+    if (by < ROWS) board[by][bx] = cur.type;
+  }
+  Snd.sLock();
+  if (topOut) { gameOver(); return; }
+
+  const full = [];
+  for (let r = 0; r < ROWS; r++) if (board[r].every(v => v)) full.push(r);
+
+  if (full.length) {
+    combo++;
+    const n = full.length;
+    const pts = [0, 100, 300, 500, 800][n] * level + (combo > 1 ? 50 * (combo - 1) * level : 0);
+    score += pts;
+    lines += n;
+    // 特效：逐行爆炸
+    for (const r of full) clearRowFx(r, board[r].map(t => COLORS[t]), n);
+    if (n >= 2) { fx.shake = Math.min(14, [0, 4, 4, 7, 11][n]); } else fx.shake = 2.5;
+    const midY = (full[0] + full[full.length - 1]) / 2 * CELL + CELL / 2;
+    addFloat('+' + pts, FW / 2, midY, '#ffd600', 26, 1.1);
+    const names = ['', '单消', '双消!', '三消!!', 'TETRIS!!!'];
+    if (n >= 2) addFloat(names[n], FW / 2, midY - 40, n === 4 ? '#ff2e54' : '#c400ff', n === 4 ? 34 : 26, 1.2);
+    if (combo > 1) { addFloat('COMBO ×' + combo, FW / 2, midY + 40, '#ff9100', 20, 1.1); Snd.sCombo(combo); }
+    if (n === 4) fx.big = 0.5;
+    // 移除整行
+    for (const r of full) { board.splice(r, 1); board.unshift(Array(COLS).fill(null)); }
+    Snd.sClear(n);
+    const newLevel = Math.min(20, (lines / 10 | 0) + 1);
+    if (newLevel > level) {
+      level = newLevel;
+      addFloat('LEVEL UP!', FW / 2, FH / 2, '#00e676', 30, 1.4);
+      Snd.sLevelUp();
+      fx.big = Math.max(fx.big, 0.3);
+    }
+  } else {
+    combo = 0;
+  }
+  updateHUD();
+  // 生成下一块
+  cur = spawnPiece(queue.shift()); ensureQueue();
+  grounded = false; groundTimer = 0; lockResets = 0; fallTimer = 0; canHold = true;
+  if (collision(cur.m, cur.x, cur.y)) { gameOver(); return; }
+  drawMini();
+}
+function takeHold() {
+  if (state !== 'playing' || !canHold || !cur) return;
+  const t = cur.type;
+  if (hold) cur = spawnPiece(hold);
+  else { cur = spawnPiece(queue.shift()); ensureQueue(); }
+  hold = t; canHold = false;
+  grounded = false; groundTimer = 0; lockResets = 0; fallTimer = 0;
+  Snd.sHold();
+  drawMini();
+}
+function gameOver() {
+  state = 'over'; cur = null;
+  if (score > best) { best = score; saveBest(); }
+  updateHUD();
+  Snd.sOver();
+  fx.shake = 12; fx.big = 0.4;
+  showOverlay('游戏结束', '本局得分 <b style="color:#ffd600">' + score + '</b><br>最高分 ' + best + '<br><br>' + tapHint('再来一局'));
+  updateStartBtn();
+}
+
+/* ================= 输入 ================= */
+const KEYMAP = {
+  ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right',
+  ArrowDown:'down', KeyS:'down',
+  ArrowUp:'rotateCW', KeyX:'rotateCW', KeyW:'rotateCW',
+  KeyZ:'rotateCCW', ControlLeft:'rotateCCW',
+  Space:'hard', KeyC:'takehold', ShiftLeft:'takehold',
+  KeyP:'pause', KeyR:'restart', KeyM:'music', KeyN:'mute', Enter:'confirm'
+};
+const HOLD_ACTIONS = { left: 1, right: 1, down: 1 };
+const held = {};
+function doAct(a) {
+  Snd.ensure();
+  if (a === 'music')  { Music.toggle(); return; }
+  if (a === 'mute')   { toggleMute(); return; }
+  if (a === 'restart'){ start(); return; }
+  if (a === 'pause')  { togglePause(); return; }
+  if (a === 'confirm'){ if (state === 'paused') togglePause(); else start(); return; }
+  if (state === 'idle' || state === 'over') { start(); if (state !== 'playing') return; }
+  if (state !== 'playing') return;
+  switch (a) {
+    case 'left':     if (tryMove(-1, 0)) Snd.sMove(); break;
+    case 'right':    if (tryMove(1, 0)) Snd.sMove(); break;
+    case 'down':     if (tryMove(0, 1)) { score++; updateHUD(); Snd.sSoft(); } else { grounded = true; groundTimer = 0; } break;
+    case 'rotateCW': tryRotate(true); break;
+    case 'rotateCCW':tryRotate(false); break;
+    case 'hard':     stopHolds(); hardDrop(); break;
+    case 'takehold': takeHold(); break;
+  }
+}
+function pressHold(a) {
+  if (held[a]) return;
+  doAct(a);
+  const t = { t0: performance.now(), last: performance.now() };
+  t.id = setInterval(() => {
+    const n = performance.now();
+    if (n - t.t0 >= DAS && n - t.last >= ARR) { doAct(a); t.last = n; }
+  }, 16);
+  held[a] = t;
+}
+function releaseHold(a) {
+  const t = held[a];
+  if (t) { clearInterval(t.id); delete held[a]; }
+}
+function stopHolds() { Object.keys(held).forEach(releaseHold); }
+
+document.addEventListener('keydown', e => {
+  const a = KEYMAP[e.code];
+  if (!a) return;
+  if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+  if (e.repeat) return;
+  if (HOLD_ACTIONS[a]) pressHold(a);
+  else doAct(a);
+});
+document.addEventListener('keyup', e => {
+  const a = KEYMAP[e.code];
+  if (a && HOLD_ACTIONS[a]) releaseHold(a);
+});
+window.addEventListener('blur', stopHolds);
+
+/* 触屏按钮 */
+document.querySelectorAll('#touch button').forEach(btn => {
+  const a = btn.dataset.act;
+  btn.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (HOLD_ACTIONS[a]) pressHold(a); else doAct(a);
+  });
+  const stop = () => { if (HOLD_ACTIONS[a]) releaseHold(a); };
+  btn.addEventListener('pointerup', stop);
+  btn.addEventListener('pointercancel', stop);
+  btn.addEventListener('pointerleave', stop);
+});
+
+/* 棋盘手势：左右拖动 = 移动，下滑 = 硬降，轻点 = 旋转（虚拟按键之外的补充操作） */
+let gest = null;
+canvas.addEventListener('pointerdown', e => {
+  if (state !== 'playing') return;
+  gest = { x0: e.clientX, y0: e.clientY, t0: performance.now(), step: Math.max(24, (stageEl.clientWidth || W) / 12), moved: 0, dropped: false };
+  if (canvas.setPointerCapture) { try { canvas.setPointerCapture(e.pointerId); } catch (err) {} }
+});
+canvas.addEventListener('pointermove', e => {
+  if (!gest || state !== 'playing') return;
+  const target = Math.round((e.clientX - gest.x0) / gest.step);
+  while (gest.moved < target) { gest.moved++; doAct('right'); }
+  while (gest.moved > target) { gest.moved--; doAct('left'); }
+  if (!gest.dropped && (e.clientY - gest.y0) > 80) { gest.dropped = true; doAct('hard'); }
+});
+canvas.addEventListener('pointerup', e => {
+  if (!gest) return;
+  const dt = performance.now() - gest.t0, dist = Math.hypot(e.clientX - gest.x0, e.clientY - gest.y0);
+  if (dt < 280 && dist < 12 && !gest.moved && !gest.dropped) doAct('rotateCW');
+  gest = null;
+});
+canvas.addEventListener('pointercancel', () => { gest = null; });
+
+/* 按钮与遮罩 */
+btnStart.addEventListener('click', () => { btnStart.blur(); doAct(state === 'playing' ? 'pause' : 'confirm'); });
+btnRestart.addEventListener('click', () => { btnRestart.blur(); doAct('restart'); });
+btnSfx.addEventListener('click', () => { btnSfx.blur(); toggleMute(); });
+btnMusic.addEventListener('click', () => { btnMusic.blur(); Music.toggle(); });
+overlayEl.addEventListener('click', () => {
+  Snd.ensure();
+  if (state === 'idle' || state === 'over') start();
+  else if (state === 'paused') togglePause();
+});
+function toggleMute() {
+  Snd.ensure();
+  Snd.muted = !Snd.muted;
+  btnSfx.textContent = '音效: ' + (Snd.muted ? '关' : '开');
+  btnSfx.classList.toggle('on', !Snd.muted);
+}
+
+/* ================= 状态切换 / HUD ================= */
+/* 按设备给出操作提示：手机讲触屏，电脑讲键盘 */
+function opHint() {
+  if (isCompact()) return '拖动 = 移动 · 轻点 = 旋转<br>下滑 = 硬降 · 其余用下方按键';
+  return '←→ 移动 · ↑ 旋转 · 空格 硬降 · C 暂存';
+}
+function tapHint(act) {
+  if (isCompact()) return '点击此处' + act;
+  return '按 <kbd>' + (act === '开始' ? '任意键' : act === '再来一局' ? 'R' : 'P') + '</kbd> 或点击此处' + act;
+}
+function showOverlay(title, info) {
+  ovTitle.textContent = title;
+  ovInfo.innerHTML = info;
+  overlayEl.classList.add('show');
+}
+function hideOverlay() { overlayEl.classList.remove('show'); }
+function updateStartBtn() {
+  btnStart.textContent = state === 'playing' ? '暂停' : (state === 'paused' ? '继续' : '开始');
+}
+function start() {
+  reset();
+  state = 'playing';
+  hideOverlay();
+  updateStartBtn();
+}
+function togglePause() {
+  if (state === 'playing') {
+    state = 'paused'; stopHolds();
+    showOverlay('已暂停', tapHint('继续游戏'));
+    updateStartBtn();
+  } else if (state === 'paused') {
+    state = 'playing';
+    hideOverlay();
+    updateStartBtn();
+  }
+}
+function updateHUD() {
+  hudScore.textContent = score;
+  hudBest.textContent = Math.max(best, score);
+  hudLevel.textContent = level;
+  hudLines.textContent = lines;
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state === 'playing') togglePause();
+});
+
+/* ================= 绘制 ================= */
+const shadeCache = {};
+function shade(hex) {
+  if (shadeCache[hex]) return shadeCache[hex];
+  const n = parseInt(hex.slice(1), 16);
+  const mix = (c, t, k) => Math.round(c + (t - c) * k);
+  const r = n >> 16 & 255, g = n >> 8 & 255, b = n & 255;
+  const to = (t, k) => 'rgb(' + mix(r, t, k) + ',' + mix(g, t, k) + ',' + mix(b, t, k) + ')';
+  return shadeCache[hex] = { main: hex, light: to(255, 0.42), dark: to(0, 0.45) };
+}
+function rrect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
+}
+function drawCell(c, x, y, s, type, alpha = 1, ghost = false) {
+  const col = COLORS[type], sh = shade(col);
+  c.globalAlpha = alpha;
+  if (ghost) {
+    c.strokeStyle = col; c.lineWidth = 1.5; c.globalAlpha = alpha * 0.6;
+    rrect(c, x + 2, y + 2, s - 4, s - 4, 4); c.stroke();
+    c.globalAlpha = alpha * 0.1; c.fillStyle = col;
+    rrect(c, x + 2, y + 2, s - 4, s - 4, 4); c.fill();
+    c.globalAlpha = 1;
+    return;
+  }
+  c.fillStyle = sh.main;
+  rrect(c, x + 1, y + 1, s - 2, s - 2, 4); c.fill();
+  c.fillStyle = sh.light;
+  c.fillRect(x + 3, y + 3, s - 6, 3);
+  c.fillRect(x + 3, y + 3, 3, s - 6);
+  c.fillStyle = sh.dark;
+  c.fillRect(x + 3, y + s - 6, s - 6, 3);
+  c.fillRect(x + s - 6, y + 3, 3, s - 6);
+  c.globalAlpha = 1;
+}
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  const sx = fx.shake ? rand(-fx.shake, fx.shake) : 0;
+  const sy = fx.shake ? rand(-fx.shake, fx.shake) : 0;
+  ctx.save();
+  ctx.translate(MARGIN + sx, MARGIN + sy);
+  // 场地
+  ctx.fillStyle = '#0a0f24';
+  rrect(ctx, 0, 0, FW, FH, 6); ctx.fill();
+  ctx.strokeStyle = 'rgba(120,150,255,0.05)'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let c = 1; c < COLS; c++) { ctx.moveTo(c * CELL + 0.5, 0); ctx.lineTo(c * CELL + 0.5, FH); }
+  for (let r = 1; r < ROWS; r++) { ctx.moveTo(0, r * CELL + 0.5); ctx.lineTo(FW, r * CELL + 0.5); }
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,229,255,0.28)'; ctx.lineWidth = 1.5;
+  rrect(ctx, 0, 0, FW, FH, 6); ctx.stroke();
+  // 已固定方块
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++)
+    if (board[r][c]) drawCell(ctx, c * CELL, r * CELL, CELL, board[r][c]);
+  // 当前方块 + 幽灵投影
+  if (cur && (state === 'playing' || state === 'paused')) {
+    const gy = ghostY();
+    for (let y = 0; y < cur.m.length; y++) for (let x = 0; x < cur.m[y].length; x++)
+      if (cur.m[y][x] && gy + y >= 0) drawCell(ctx, (cur.x + x) * CELL, (gy + y) * CELL, CELL, cur.type, 0.5, true);
+    for (let y = 0; y < cur.m.length; y++) for (let x = 0; x < cur.m[y].length; x++)
+      if (cur.m[y][x] && cur.y + y >= 0) drawCell(ctx, (cur.x + x) * CELL, (cur.y + y) * CELL, CELL, cur.type);
+  }
+  drawFx();
+  ctx.restore();
+  if (fx.big > 0) {
+    ctx.fillStyle = 'rgba(255,255,255,' + (fx.big * 0.5) + ')';
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+function trimmed(type) {
+  const m = SHAPES[type];
+  let t = 9, b = -1, l = 9, r = -1;
+  for (let y = 0; y < m.length; y++) for (let x = 0; x < m[y].length; x++)
+    if (m[y][x]) { t = Math.min(t, y); b = Math.max(b, y); l = Math.min(l, x); r = Math.max(r, x); }
+  const out = [];
+  for (let y = t; y <= b; y++) out.push(m[y].slice(l, r + 1));
+  return out;
+}
+function drawPieceIn(c, type, cx, cy, size) {
+  const m = trimmed(type);
+  const px = cx - m[0].length * size / 2, py = cy - m.length * size / 2;
+  for (let y = 0; y < m.length; y++) for (let x = 0; x < m[y].length; x++)
+    if (m[y][x]) drawCell(c, px + x * size, py + y * size, size, type);
+}
+function drawMini() {
+  holdCtx.clearRect(0, 0, 188, 64);
+  if (hold) {
+    holdCtx.globalAlpha = canHold ? 1 : 0.35;
+    drawPieceIn(holdCtx, hold, 94, 32, 15);
+    holdCtx.globalAlpha = 1;
+  }
+  nextCtx.clearRect(0, 0, 188, 156);
+  queue.slice(0, 3).forEach((type, i) => {
+    const cy = 28 + i * 52;
+    nextCtx.fillStyle = 'rgba(120,150,255,0.08)';
+    nextCtx.fillRect(14, cy + 24, 160, 1);
+    drawPieceIn(nextCtx, type, 94, cy, 13);
+  });
+}
+
+/* ================= 主循环 ================= */
+function update(dt) {
+  if (state !== 'playing' || !cur) return;
+  if (grounded) {
+    groundTimer += dt * 1000;
+    if (groundTimer >= LOCK_DELAY) { lockPiece(); return; }
+  }
+  fallTimer += dt * 1000;
+  const iv = curSpeed();
+  while (fallTimer >= iv) {
+    fallTimer -= iv;
+    if (!tryMove(0, 1)) { grounded = true; groundTimer = 0; break; }
+  }
+}
+let lastT = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - lastT) / 1000);
+  lastT = now;
+  update(dt);
+  updateFx(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+
+/* ================= 启动 ================= */
+loadBestSafe();
+reset();
+showOverlay('俄罗斯方块', tapHint('开始') + '<br><br>' + opHint());
+updateStartBtn();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
